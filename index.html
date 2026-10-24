@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Recent Twenty</title>
+<title>Recently Played</title>
 <meta name="color-scheme" content="light dark">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;700;800&family=Inter+Tight:wght@400;500&display=swap">
@@ -75,6 +75,12 @@
     border-top: 1px solid var(--line);
   }
   .bar > div { max-width: 560px; margin: 0 auto; }
+  .seg { display: flex; flex-wrap: wrap; gap: 6px; }
+  .seg button { font: inherit; font-size: 13px; font-weight: 500; padding: 7px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); color: var(--fg); cursor: pointer; }
+  .seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); font-weight: 700; }
+  .seg button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .range { display: grid; gap: 10px; margin-bottom: 14px; }
+  .range .eyebrow { margin-bottom: 2px; }
   [hidden] { display: none !important; }
   @media (prefers-reduced-motion: no-preference) { .btn { transition: transform .08s ease; } .btn:active { transform: scale(.98); } }
 </style>
@@ -83,8 +89,8 @@
 <main>
   <header>
     <div class="eyebrow">Spotify</div>
-    <h1>Recent Twenty</h1>
-    <p class="lede">Turn the last 20 tracks you played into a playlist.</p>
+    <h1>Recently Played</h1>
+    <p class="lede">Turn what you just listened to into a playlist.</p>
   </header>
 
   <section id="setup" class="card" hidden>
@@ -107,8 +113,23 @@
   </section>
 
   <section id="tracks" hidden>
+    <div class="range card">
+      <div>
+        <div class="eyebrow">How many</div>
+        <div class="seg" id="countSeg" role="group" aria-label="Number of tracks">
+          <button data-count="10">10</button><button data-count="20" aria-pressed="true">20</button><button data-count="30">30</button><button data-count="50">50</button>
+        </div>
+      </div>
+      <div>
+        <div class="eyebrow">Played within</div>
+        <div class="seg" id="windowSeg" role="group" aria-label="Time window">
+          <button data-hours="0" aria-pressed="true">Any time</button><button data-hours="1">Last hour</button><button data-hours="3">3 hours</button><button data-hours="24">Today</button><button data-hours="168">This week</button>
+        </div>
+      </div>
+      <p class="status" style="margin:0" id="rangeNote"></p>
+    </div>
     <div class="row" style="justify-content:space-between;margin-bottom:8px">
-      <div class="eyebrow">Last 20 played</div>
+      <div class="eyebrow" id="listLabel">Last 20 played</div>
       <button class="btn ghost" id="refreshBtn" style="width:auto;padding:8px 12px;font-size:13px">Refresh</button>
     </div>
     <div class="card"><ol class="tracks" id="trackList"></ol></div>
@@ -136,7 +157,8 @@
 (() => {
   const DEFAULT_CLIENT_ID = "3d9c64ec6b0b4a46935accb2a57b7476";
   const SCOPES = "user-read-recently-played playlist-modify-private playlist-modify-public";
-  const LIMIT = 20;
+  const MAX = 50; // Spotify only exposes the last 50 plays
+  let count = +(store.get("sp_count") || 20), hours = +(store.get("sp_hours") || 0);
   const REDIRECT_URI = location.origin + location.pathname;
 
   const $ = id => document.getElementById(id);
@@ -146,7 +168,7 @@
     del(k){ try { localStorage.removeItem(k); } catch {} },
   };
 
-  let token = null, items = [];
+  let token = null, all = [], items = [];
 
   $("redirectUri").textContent = REDIRECT_URI;
   $("clientId").value = store.get("sp_client_id") || DEFAULT_CLIENT_ID;
@@ -222,16 +244,42 @@
       const when = document.createElement("div"); when.className = "when"; when.textContent = ago(it.played_at);
       box.append(name, art, when); li.append(num, img, box); ol.append(li);
     });
-    $("playlistName").value ||= `Last 20 played · ${new Date().toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}`;
+    const windowLabel = { 1: "last hour", 3: "last 3 hours", 24: "today", 168: "this week" }[hours];
+    $("listLabel").textContent = windowLabel ? `Last ${items.length} played, ${windowLabel}` : `Last ${items.length} played`;
+    const cutoff = hours ? all.filter(it => Date.now() - new Date(it.played_at) <= hours * 3600e3).length : all.length;
+    $("rangeNote").textContent = hours && cutoff < count ? `Only ${cutoff} play${cutoff === 1 ? "" : "s"} fall within that window.` : "";
+    const date = new Date().toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+    $("playlistName").value = windowLabel ? `${windowLabel[0].toUpperCase() + windowLabel.slice(1)} · ${date}` : `Last ${items.length} played · ${date}`;
+    $("createBtn").textContent = `Create playlist (${items.length})`;
+    $("bar").hidden = !items.length;
   }
+
+  function applyRange() {
+    let pool = all;
+    if (hours) pool = pool.filter(it => Date.now() - new Date(it.played_at) <= hours * 3600e3);
+    items = pool.slice(0, count);
+    render();
+  }
+
+  function wireSeg(id, attr, onPick) {
+    $(id).addEventListener("click", e => {
+      const b = e.target.closest("button[data-" + attr + "]"); if (!b) return;
+      for (const x of $(id).children) x.setAttribute("aria-pressed", String(x === b));
+      onPick(+b.dataset[attr]); applyRange();
+    });
+  }
+  wireSeg("countSeg", "count", v => { count = v; store.set("sp_count", v); });
+  wireSeg("windowSeg", "hours", v => { hours = v; store.set("sp_hours", v); });
+  for (const b of $("countSeg").children) b.setAttribute("aria-pressed", String(+b.dataset.count === count));
+  for (const b of $("windowSeg").children) b.setAttribute("aria-pressed", String(+b.dataset.hours === hours));
 
   async function loadTracks() {
     $("globalStatus").textContent = "Loading recent plays…"; $("globalStatus").className = "status";
-    const j = await api("GET", `/me/player/recently-played?limit=${LIMIT}`);
-    items = j.items || [];
-    render();
-    $("globalStatus").textContent = items.length ? "" : "Spotify returned no recent plays.";
-    show("tracks"); $("bar").hidden = !items.length; $("result").hidden = true;
+    const j = await api("GET", `/me/player/recently-played?limit=${MAX}`);
+    all = j.items || [];
+    show("tracks"); $("result").hidden = true;
+    applyRange();
+    $("globalStatus").textContent = all.length ? "" : "Spotify returned no recent plays.";
   }
 
   async function createPlaylist() {
@@ -241,14 +289,14 @@
       for (const it of items) if (!seen.has(it.track.uri)) { seen.add(it.track.uri); uris.push(it.track.uri); }
       const me = await api("GET", "/me");
       const name = $("playlistName").value.trim() || "Last 20 played";
-      const pl = await api("POST", `/users/${me.id}/playlists`, { name, public: false, description: `Built from the last ${LIMIT} tracks played.` });
+      const pl = await api("POST", `/users/${me.id}/playlists`, { name, public: false, description: `Built from recently played tracks.` });
       await api("POST", `/playlists/${pl.id}/tracks`, { uris });
       const dupes = items.length - uris.length;
       $("resultText").textContent = `“${name}” has ${uris.length} tracks${dupes ? ` (${dupes} repeat play${dupes > 1 ? "s" : ""} collapsed)` : ""}.`;
       $("resultLink").href = pl.external_urls.spotify;
       $("result").hidden = false; $("result").scrollIntoView({ behavior: "smooth", block: "center" });
     } catch (e) { fail(e); }
-    finally { btn.disabled = false; btn.textContent = "Create playlist"; }
+    finally { btn.disabled = false; btn.textContent = `Create playlist (${items.length})`; }
   }
 
   function show(id) { for (const s of ["setup", "connect", "tracks"]) $(s).hidden = s !== id; if (id !== "tracks") $("bar").hidden = true; }
