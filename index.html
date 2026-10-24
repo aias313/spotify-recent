@@ -176,7 +176,6 @@
   const DEFAULT_CLIENT_ID = "3d9c64ec6b0b4a46935accb2a57b7476";
   const SCOPES = "user-read-recently-played playlist-modify-private playlist-modify-public";
   const MAX = 50; // Spotify only exposes the last 50 plays
-  let count = +(store.get("sp_count") || 20), hours = +(store.get("sp_hours") || 0);
   const REDIRECT_URI = location.origin + location.pathname;
 
   const $ = id => document.getElementById(id);
@@ -187,6 +186,7 @@
   };
 
   let token = null, all = [], items = [], picked = new Set(), lastIdx = null;
+  let count = +(store.get("sp_count") || 20), hours = +(store.get("sp_hours") || 0);
 
   $("redirectUri").textContent = REDIRECT_URI;
   $("clientId").value = store.get("sp_client_id") || DEFAULT_CLIENT_ID;
