@@ -54,7 +54,14 @@
   label.field { display: grid; gap: 6px; }
   input[type=text] { width: 100%; padding: 12px 14px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); }
   ol.tracks { list-style: none; margin: 0; padding: 0; display: grid; }
-  ol.tracks li { display: grid; grid-template-columns: 24px 44px 1fr; gap: 12px; align-items: center; padding: 10px 0; border-top: 1px solid var(--line); min-width: 0; }
+  ol.tracks li { display: grid; grid-template-columns: 22px 24px 44px 1fr; gap: 10px; align-items: center; padding: 10px 0; border-top: 1px solid var(--line); min-width: 0; cursor: pointer; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+  ol.tracks li.off { opacity: .45; }
+  ol.tracks li.off img { filter: grayscale(1); }
+  ol.tracks input[type=checkbox] { width: 20px; height: 20px; margin: 0; accent-color: var(--accent); cursor: pointer; }
+  .selbar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; justify-content: space-between; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+  .selbar .count { font-family: var(--display); font-weight: 700; font-size: 13px; font-variant-numeric: tabular-nums; }
+  .selbar .seg button { padding: 5px 10px; }
+  .hint { color: var(--muted); font-size: 12px; padding: 8px 12px 0; }
   ol.tracks li:first-child { border-top: 0; }
   ol.tracks img { width: 44px; height: 44px; border-radius: 6px; object-fit: cover; background: var(--line); }
   .num { font-family: var(--display); font-weight: 700; color: var(--muted); font-variant-numeric: tabular-nums; font-size: 13px; text-align: right; }
@@ -132,7 +139,18 @@
       <div class="eyebrow" id="listLabel">Last 20 played</div>
       <button class="btn ghost" id="refreshBtn" style="width:auto;padding:8px 12px;font-size:13px">Refresh</button>
     </div>
-    <div class="card"><ol class="tracks" id="trackList"></ol></div>
+    <div class="card" style="padding:0">
+      <div class="selbar">
+        <span class="count" id="selCount"></span>
+        <div class="seg">
+          <button type="button" id="selAll">All</button>
+          <button type="button" id="selNone">None</button>
+          <button type="button" id="selInvert">Invert</button>
+        </div>
+      </div>
+      <p class="hint">Tap a track to toggle it. Shift-click, or press and hold, to select everything between it and your last tap.</p>
+      <ol class="tracks" id="trackList" style="padding:0 12px"></ol>
+    </div>
   </section>
 
   <section id="result" class="card done" hidden>
@@ -168,7 +186,7 @@
     del(k){ try { localStorage.removeItem(k); } catch {} },
   };
 
-  let token = null, all = [], items = [];
+  let token = null, all = [], items = [], picked = new Set(), lastIdx = null;
 
   $("redirectUri").textContent = REDIRECT_URI;
   $("clientId").value = store.get("sp_client_id") || DEFAULT_CLIENT_ID;
@@ -236,13 +254,15 @@
     const ol = $("trackList"); ol.innerHTML = "";
     items.forEach((it, i) => {
       const t = it.track, li = document.createElement("li");
+      li.dataset.i = i; li.classList.toggle("off", !picked.has(i));
+      const cb = document.createElement("input"); cb.type = "checkbox"; cb.checked = picked.has(i); cb.tabIndex = -1; cb.setAttribute("aria-label", "Include " + t.name);
       const img = document.createElement("img"); img.alt = ""; img.src = t.album?.images?.at(-1)?.url || "";
       const num = document.createElement("div"); num.className = "num"; num.textContent = String(i + 1).padStart(2, "0");
       const box = document.createElement("div"); box.className = "t";
       const name = document.createElement("div"); name.className = "name"; name.textContent = t.name;
       const art = document.createElement("div"); art.className = "artist"; art.textContent = t.artists.map(a => a.name).join(", ");
       const when = document.createElement("div"); when.className = "when"; when.textContent = ago(it.played_at);
-      box.append(name, art, when); li.append(num, img, box); ol.append(li);
+      box.append(name, art, when); li.append(cb, num, img, box); ol.append(li);
     });
     const windowLabel = { 1: "last hour", 3: "last 3 hours", 24: "today", 168: "this week" }[hours];
     $("listLabel").textContent = windowLabel ? `Last ${items.length} played, ${windowLabel}` : `Last ${items.length} played`;
@@ -250,14 +270,53 @@
     $("rangeNote").textContent = hours && cutoff < count ? `Only ${cutoff} play${cutoff === 1 ? "" : "s"} fall within that window.` : "";
     const date = new Date().toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
     $("playlistName").value = windowLabel ? `${windowLabel[0].toUpperCase() + windowLabel.slice(1)} · ${date}` : `Last ${items.length} played · ${date}`;
-    $("createBtn").textContent = `Create playlist (${items.length})`;
-    $("bar").hidden = !items.length;
+    updateSel();
   }
+
+  const chosen = () => items.filter((_, i) => picked.has(i));
+  function updateSel() {
+    const n = picked.size;
+    $("selCount").textContent = `${n} of ${items.length} selected`;
+    $("createBtn").textContent = `Create playlist (${n})`;
+    $("createBtn").disabled = !n;
+    $("bar").hidden = !items.length;
+    for (const li of $("trackList").children) {
+      const on = picked.has(+li.dataset.i);
+      li.classList.toggle("off", !on); li.querySelector("input").checked = on;
+    }
+  }
+  function setRange(a, b, on) { for (let i = Math.min(a, b); i <= Math.max(a, b); i++) on ? picked.add(i) : picked.delete(i); }
+
+  $("selAll").addEventListener("click", () => { picked = new Set(items.map((_, i) => i)); updateSel(); });
+  $("selNone").addEventListener("click", () => { picked.clear(); updateSel(); });
+  $("selInvert").addEventListener("click", () => { picked = new Set(items.map((_, i) => i).filter(i => !picked.has(i))); updateSel(); });
+
+  let pressTimer = null, longPressed = false;
+  const list = $("trackList");
+  list.addEventListener("click", e => {
+    const li = e.target.closest("li"); if (!li) return;
+    if (longPressed) { longPressed = false; return; }
+    const i = +li.dataset.i;
+    if (e.shiftKey && lastIdx !== null) setRange(lastIdx, i, true);
+    else picked.has(i) ? picked.delete(i) : picked.add(i);
+    lastIdx = i; updateSel();
+  });
+  list.addEventListener("pointerdown", e => {
+    const li = e.target.closest("li"); if (!li || e.pointerType === "mouse") return;
+    const i = +li.dataset.i;
+    pressTimer = setTimeout(() => {
+      longPressed = true; setRange(lastIdx ?? 0, i, true); lastIdx = i; updateSel();
+      if (navigator.vibrate) navigator.vibrate(10);
+    }, 450);
+  });
+  for (const ev of ["pointerup", "pointercancel", "pointermove"]) list.addEventListener(ev, e => { if (ev !== "pointermove" || Math.abs(e.movementX) + Math.abs(e.movementY) > 4) clearTimeout(pressTimer); });
+  list.addEventListener("contextmenu", e => e.preventDefault());
 
   function applyRange() {
     let pool = all;
     if (hours) pool = pool.filter(it => Date.now() - new Date(it.played_at) <= hours * 3600e3);
     items = pool.slice(0, count);
+    picked = new Set(items.map((_, i) => i)); lastIdx = null;
     render();
   }
 
@@ -285,18 +344,19 @@
   async function createPlaylist() {
     const btn = $("createBtn"); btn.disabled = true; btn.textContent = "Creating…";
     try {
+      const sel = chosen();
       const seen = new Set(), uris = [];
-      for (const it of items) if (!seen.has(it.track.uri)) { seen.add(it.track.uri); uris.push(it.track.uri); }
+      for (const it of sel) if (!seen.has(it.track.uri)) { seen.add(it.track.uri); uris.push(it.track.uri); }
       const me = await api("GET", "/me");
       const name = $("playlistName").value.trim() || "Last 20 played";
       const pl = await api("POST", `/users/${me.id}/playlists`, { name, public: false, description: `Built from recently played tracks.` });
       await api("POST", `/playlists/${pl.id}/tracks`, { uris });
-      const dupes = items.length - uris.length;
+      const dupes = sel.length - uris.length;
       $("resultText").textContent = `“${name}” has ${uris.length} tracks${dupes ? ` (${dupes} repeat play${dupes > 1 ? "s" : ""} collapsed)` : ""}.`;
       $("resultLink").href = pl.external_urls.spotify;
       $("result").hidden = false; $("result").scrollIntoView({ behavior: "smooth", block: "center" });
     } catch (e) { fail(e); }
-    finally { btn.disabled = false; btn.textContent = `Create playlist (${items.length})`; }
+    finally { updateSel(); }
   }
 
   function show(id) { for (const s of ["setup", "connect", "tracks"]) $(s).hidden = s !== id; if (id !== "tracks") $("bar").hidden = true; }
