@@ -165,7 +165,8 @@
 <div class="bar" id="bar" hidden>
   <div>
     <label class="field" style="margin-bottom:10px">
-      <input type="text" id="playlistName" placeholder="Playlist name">
+      <span class="eyebrow">Playlist name</span>
+      <input type="text" id="playlistName" placeholder="Name your playlist" autocomplete="off" enterkeyhint="done">
     </label>
     <button class="btn" id="createBtn">Create playlist</button>
   </div>
@@ -186,6 +187,7 @@
   };
 
   let token = null, all = [], items = [], picked = new Set(), lastIdx = null;
+  let nameTouched = false;
   let count = +(store.get("sp_count") || 20), hours = +(store.get("sp_hours") || 0);
 
   $("redirectUri").textContent = REDIRECT_URI;
@@ -269,7 +271,7 @@
     const cutoff = hours ? all.filter(it => Date.now() - new Date(it.played_at) <= hours * 3600e3).length : all.length;
     $("rangeNote").textContent = hours && cutoff < count ? `Only ${cutoff} play${cutoff === 1 ? "" : "s"} fall within that window.` : "";
     const date = new Date().toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
-    $("playlistName").value = windowLabel ? `${windowLabel[0].toUpperCase() + windowLabel.slice(1)} · ${date}` : `Last ${items.length} played · ${date}`;
+    if (!nameTouched) $("playlistName").value = windowLabel ? `${windowLabel[0].toUpperCase() + windowLabel.slice(1)} · ${date}` : `Last ${items.length} played · ${date}`;
     updateSel();
   }
 
@@ -354,7 +356,7 @@
       const dupes = sel.length - uris.length;
       $("resultText").textContent = `“${name}” has ${uris.length} tracks${dupes ? ` (${dupes} repeat play${dupes > 1 ? "s" : ""} collapsed)` : ""}.`;
       $("resultLink").href = pl.external_urls.spotify;
-      $("result").hidden = false; $("result").scrollIntoView({ behavior: "smooth", block: "center" });
+      nameTouched = false; $("result").hidden = false; $("result").scrollIntoView({ behavior: "smooth", block: "center" });
     } catch (e) { fail(e); }
     finally { updateSel(); }
   }
@@ -365,6 +367,8 @@
   $("connectBtn").addEventListener("click", startAuth);
   $("refreshBtn").addEventListener("click", () => loadTracks().catch(fail));
   $("createBtn").addEventListener("click", createPlaylist);
+  $("playlistName").addEventListener("input", e => { nameTouched = e.target.value.trim() !== ""; });
+  $("playlistName").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); e.target.blur(); } });
 
   (async () => {
     const q = new URLSearchParams(location.search);
