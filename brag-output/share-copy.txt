@@ -1,0 +1,1 @@
+Built a one-page tool that turns my last 50 Spotify plays into a playlist in three taps: pick the range, pick the tracks, name it. No app, no server, no secret. Just a page: aias313.github.io/spotify-recent
